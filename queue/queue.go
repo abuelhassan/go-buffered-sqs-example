@@ -48,27 +48,27 @@ func GetBufferedInstance(url string) Queue {
 
 	go func() {
 		ticker := time.NewTicker(q.sendBufferDur)
-		sendBuffer := make([]string, 0, bufferSize)
+		buffer := make([]string, 0, bufferSize)
 		for {
 			select {
 			case msg := <-q.sendCh:
-				sendBuffer = append(sendBuffer, msg)
-				if len(sendBuffer) < bufferSize {
+				buffer = append(buffer, msg)
+				if len(buffer) < bufferSize {
 					continue
 				}
 			case <-ticker.C:
-				if len(sendBuffer) == 0 {
+				if len(buffer) == 0 {
 					continue
 				}
 			}
-			entries := make([]types.SendMessageBatchRequestEntry, len(sendBuffer))
-			for i, msg := range sendBuffer {
+			entries := make([]types.SendMessageBatchRequestEntry, len(buffer))
+			for i, msg := range buffer {
 				entries[i] = types.SendMessageBatchRequestEntry{
 					Id:          aws.String(strconv.Itoa(i)),
 					MessageBody: aws.String(msg),
 				}
 			}
-			log.Printf("Sending: %d", len(sendBuffer))
+			log.Printf("Sending: %d", len(buffer))
 			_, err := sqsClient.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{
 				Entries:  entries,
 				QueueUrl: &url,
@@ -77,33 +77,33 @@ func GetBufferedInstance(url string) Queue {
 				log.Printf("unable to send messages, %v\n", err) // report error
 				continue
 			}
-			sendBuffer = make([]string, 0, bufferSize)
+			buffer = make([]string, 0, bufferSize)
 		}
 	}()
 
 	go func() {
 		ticker := time.NewTicker(q.delBufferDur)
-		delBuffer := make([]string, 0, bufferSize)
+		buffer := make([]string, 0, bufferSize)
 		for {
 			select {
 			case msg := <-q.delCh:
-				delBuffer = append(delBuffer, msg)
-				if len(delBuffer) < bufferSize {
+				buffer = append(buffer, msg)
+				if len(buffer) < bufferSize {
 					continue
 				}
 			case <-ticker.C:
-				if len(delBuffer) == 0 {
+				if len(buffer) == 0 {
 					continue
 				}
 			}
-			entries := make([]types.DeleteMessageBatchRequestEntry, len(delBuffer))
-			for i, msg := range delBuffer {
+			entries := make([]types.DeleteMessageBatchRequestEntry, len(buffer))
+			for i, msg := range buffer {
 				entries[i] = types.DeleteMessageBatchRequestEntry{
 					Id:            aws.String(strconv.Itoa(i)),
 					ReceiptHandle: aws.String(msg),
 				}
 			}
-			log.Printf("Deleting: %d", len(delBuffer))
+			log.Printf("Deleting: %d", len(buffer))
 			_, err := sqsClient.DeleteMessageBatch(context.Background(), &sqs.DeleteMessageBatchInput{
 				Entries:  entries,
 				QueueUrl: &url,
@@ -112,7 +112,7 @@ func GetBufferedInstance(url string) Queue {
 				log.Printf("unable to delete messages, %v\n", err) // report error
 				continue
 			}
-			delBuffer = make([]string, 0, bufferSize)
+			buffer = make([]string, 0, bufferSize)
 		}
 	}()
 
