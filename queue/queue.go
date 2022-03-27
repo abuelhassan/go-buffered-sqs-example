@@ -46,9 +46,9 @@ func GetBufferedInstance(url string) Queue {
 		delCh:         make(chan string),
 	}
 
-	sendBuffer := make([]string, 0, bufferSize)
 	go func() {
 		ticker := time.NewTicker(q.sendBufferDur)
+		sendBuffer := make([]string, 0, bufferSize)
 		for {
 			select {
 			case msg := <-q.sendCh:
@@ -81,9 +81,9 @@ func GetBufferedInstance(url string) Queue {
 		}
 	}()
 
-	delBuffer := make([]string, 0, bufferSize)
 	go func() {
 		ticker := time.NewTicker(q.delBufferDur)
+		delBuffer := make([]string, 0, bufferSize)
 		for {
 			select {
 			case msg := <-q.delCh:
