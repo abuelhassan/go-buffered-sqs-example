@@ -42,8 +42,8 @@ func GetBufferedInstance(url string) Queue {
 		url:           url,
 		sendBufferDur: 10 * time.Second,
 		delBufferDur:  5 * time.Second,
-		sendCh:        make(chan string),
-		delCh:         make(chan string),
+		sendCh:        make(chan string, 50),
+		delCh:         make(chan string, 50),
 	}
 
 	go func() {
