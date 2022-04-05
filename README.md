@@ -4,7 +4,7 @@
 
 [To reduce costs](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/reducing-costs.html)
 
-## How to Run
+## How to Run?
 
 ### Prerequisites
 
