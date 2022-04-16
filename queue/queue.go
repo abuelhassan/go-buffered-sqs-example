@@ -12,6 +12,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
+const (
+	bufferSize = 10
+)
+
 var (
 	sqsClient *sqs.Client
 )
@@ -31,100 +35,89 @@ type bufferedQueue struct {
 	url           string
 	sendBufferDur time.Duration
 	delBufferDur  time.Duration
-	sendCh        chan string // channel of message bodies
-	delCh         chan string // channel of receipt handles
+	sendCh        chan sendInput
+	delCh         chan deleteInput
 }
 
-func GetBufferedInstance(url string) Queue {
-	const bufferSize = 10
+type (
+	sendInput   string // message body
+	deleteInput string // receipt handle
+)
 
+func GetBufferedInstance(url string) Queue {
 	q := bufferedQueue{
 		url:           url,
 		sendBufferDur: 10 * time.Second,
 		delBufferDur:  5 * time.Second,
-		sendCh:        make(chan string, 50),
-		delCh:         make(chan string, 50),
+		sendCh:        make(chan sendInput, 50),
+		delCh:         make(chan deleteInput, 50),
 	}
 
-	go func() {
-		ticker := time.NewTicker(q.sendBufferDur)
-		buffer := make([]string, 0, bufferSize)
-		for {
-			select {
-			case msg := <-q.sendCh:
-				buffer = append(buffer, msg)
-				if len(buffer) < bufferSize {
-					continue
-				}
-			case <-ticker.C:
-				if len(buffer) == 0 {
-					continue
-				}
+	go background[sendInput](q.sendCh, q.sendBufferDur, func(buffer []sendInput) {
+		entries := make([]types.SendMessageBatchRequestEntry, len(buffer))
+		for i, msg := range buffer {
+			entries[i] = types.SendMessageBatchRequestEntry{
+				Id:          aws.String(strconv.Itoa(i)),
+				MessageBody: aws.String(string(msg)),
 			}
-			entries := make([]types.SendMessageBatchRequestEntry, len(buffer))
-			for i, msg := range buffer {
-				entries[i] = types.SendMessageBatchRequestEntry{
-					Id:          aws.String(strconv.Itoa(i)),
-					MessageBody: aws.String(msg),
-				}
-			}
-			log.Printf("Sending: %d", len(buffer))
-			_, err := sqsClient.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{
-				Entries:  entries,
-				QueueUrl: &url,
-			})
-			if err != nil {
-				log.Printf("unable to send messages, %v\n", err) // report error
-				continue
-			}
-			buffer = make([]string, 0, bufferSize)
 		}
-	}()
+		log.Printf("Sending: %d", len(buffer))
+		_, err := sqsClient.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{
+			Entries:  entries,
+			QueueUrl: &url,
+		})
+		if err != nil {
+			log.Printf("unable to send messages, %v\n", err) // report error
+		}
+	})
 
-	go func() {
-		ticker := time.NewTicker(q.delBufferDur)
-		buffer := make([]string, 0, bufferSize)
-		for {
-			select {
-			case msg := <-q.delCh:
-				buffer = append(buffer, msg)
-				if len(buffer) < bufferSize {
-					continue
-				}
-			case <-ticker.C:
-				if len(buffer) == 0 {
-					continue
-				}
+	go background[deleteInput](q.delCh, q.delBufferDur, func(buffer []deleteInput) {
+		entries := make([]types.DeleteMessageBatchRequestEntry, len(buffer))
+		for i, msg := range buffer {
+			entries[i] = types.DeleteMessageBatchRequestEntry{
+				Id:            aws.String(strconv.Itoa(i)),
+				ReceiptHandle: aws.String(string(msg)),
 			}
-			entries := make([]types.DeleteMessageBatchRequestEntry, len(buffer))
-			for i, msg := range buffer {
-				entries[i] = types.DeleteMessageBatchRequestEntry{
-					Id:            aws.String(strconv.Itoa(i)),
-					ReceiptHandle: aws.String(msg),
-				}
-			}
-			log.Printf("Deleting: %d", len(buffer))
-			_, err := sqsClient.DeleteMessageBatch(context.Background(), &sqs.DeleteMessageBatchInput{
-				Entries:  entries,
-				QueueUrl: &url,
-			})
-			if err != nil {
-				log.Printf("unable to delete messages, %v\n", err) // report error
-				continue
-			}
-			buffer = make([]string, 0, bufferSize)
 		}
-	}()
+		log.Printf("Deleting: %d", len(buffer))
+		_, err := sqsClient.DeleteMessageBatch(context.Background(), &sqs.DeleteMessageBatchInput{
+			Entries:  entries,
+			QueueUrl: &url,
+		})
+		if err != nil {
+			log.Printf("unable to delete messages, %v\n", err) // report error
+		}
+	})
 
 	return &q
 }
 
+func background[T sendInput | deleteInput](ch <-chan T, bufferDur time.Duration, doRequest func(buffer []T)) {
+	ticker := time.NewTicker(bufferDur)
+	buffer := make([]T, 0, bufferSize)
+	for {
+		select {
+		case msg := <-ch:
+			buffer = append(buffer, msg)
+			if len(buffer) < bufferSize {
+				continue
+			}
+		case <-ticker.C:
+			if len(buffer) == 0 {
+				continue
+			}
+		}
+		doRequest(buffer)
+		buffer = make([]T, 0, bufferSize)
+	}
+}
+
 func (q bufferedQueue) SendMessage(body string) {
-	q.sendCh <- body
+	q.sendCh <- sendInput(body)
 }
 
 func (q bufferedQueue) DeleteMessage(receiptHandle string) {
-	q.delCh <- receiptHandle
+	q.delCh <- deleteInput(receiptHandle)
 }
 
 func (q bufferedQueue) ReceiveMessages(ctx context.Context) ([]ReceiveOutput, error) {
