@@ -32,7 +32,7 @@ func generator(ctx context.Context, wg *sync.WaitGroup, q queue.Queue) {
 
 			for i := 0; i < 1+rand.Int()%15; i++ { // random value from 1 to 15
 				body := fmt.Sprintf("%d_%s", i, time.Now().UTC().Format(time.RFC3339Nano))
-				q.SendMessage(body)
+				q.SendMessage(queue.SendInput(body))
 			}
 		case <-ctx.Done():
 			return
@@ -67,7 +67,7 @@ func processor(wg *sync.WaitGroup, q queue.Queue, ch <-chan queue.ReceiveOutput)
 
 	for msg := range ch {
 		time.Sleep(500 * time.Millisecond) // for debugging.
-		q.DeleteMessage(msg.ReceiptHandle)
+		q.DeleteMessage(queue.DeleteInput(msg.ReceiptHandle))
 		log.Printf("processed %s\n", msg.Body)
 	}
 }
